@@ -1,10 +1,3 @@
-/*
- * ╔══════════════════════════════════════════════════════════════╗
- *   SISTEMA DE BARBEARIA  —  v2.1
- *   Módulos: Usuários · Agendamentos · Serviços · Níveis de Acesso
- *   v2.1: Validação completa de dígitos verificadores do CPF
- * ╚══════════════════════════════════════════════════════════════╝
- */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,9 +5,7 @@
 #include <ctype.h>
 #include <time.h>
 
-/* ─────────────────────────────────────────────────────────────
- *  CONSTANTES
- * ───────────────────────────────────────────────────────────── */
+
 #define MAX_USUARIOS      100
 #define MAX_AGENDAMENTOS  500
 #define TAM_NOME           60
@@ -36,9 +27,6 @@ static const char *SLOTS[TOTAL_SLOTS] = {
     "17:00","17:30"
 };
 
-/* ─────────────────────────────────────────────────────────────
- *  TIPOS
- * ───────────────────────────────────────────────────────────── */
 typedef enum { CLIENTE = 1, BARBEIRO, ADMIN } TipoPerfil;
 
 typedef enum {
@@ -83,9 +71,6 @@ typedef struct {
     float       preco;
 } InfoServico;
 
-/* ─────────────────────────────────────────────────────────────
- *  ESTADO GLOBAL
- * ───────────────────────────────────────────────────────────── */
 static Usuario     usuarios[MAX_USUARIOS];
 static int         total_usr   = 0;
 static int         prox_id_usr = 1;
@@ -105,9 +90,6 @@ static const InfoServico SERVICOS[] = {
 };
 #define N_SERVICOS 5
 
-/* ═══════════════════════════════════════════════════════════════
- *  UTILITÁRIOS DE INTERFACE
- * ═══════════════════════════════════════════════════════════════ */
 
 void limpar_tela(void) {
 #ifdef _WIN32
@@ -157,9 +139,6 @@ int ler_int(const char *prompt) {
     return v;
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  VALIDAÇÕES
- * ═══════════════════════════════════════════════════════════════ */
 
 /* Verifica apenas a máscara: "NNN.NNN.NNN-NN" ou 11 dígitos crus */
 int validar_cpf_formato(const char *cpf) {
@@ -262,10 +241,6 @@ int cmp_data(const char *a, const char *b) {
     return strcmp(fa, fb);
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  SERVIÇOS
- * ═══════════════════════════════════════════════════════════════ */
-
 const InfoServico *info_servico(TipoServico s) {
     for (int i = 0; i < N_SERVICOS; i++)
         if (SERVICOS[i].id == s) return &SERVICOS[i];
@@ -282,9 +257,6 @@ void listar_servicos_tabela(void) {
     printf("  +------+-------------------------------------+---------+\n");
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  PERSISTÊNCIA
- * ═══════════════════════════════════════════════════════════════ */
 
 void salvar_usuarios(void) {
     FILE *f = fopen(ARQUIVO_USUARIOS, "wb");
@@ -334,9 +306,6 @@ void carregar_agendamentos(void) {
     fclose(f);
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  BUSCA DE USUÁRIOS
- * ═══════════════════════════════════════════════════════════════ */
 
 Usuario *buscar_cpf(const char *cpf) {
     for (int i = 0; i < total_usr; i++)
@@ -370,9 +339,6 @@ const char *status_str(StatusAgendamento s) {
     }
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  AUTENTICAÇÃO
- * ═══════════════════════════════════════════════════════════════ */
 
 int fazer_login(void) {
     cabecalho("LOGIN");
@@ -402,9 +368,6 @@ int fazer_login(void) {
     pausar(); return 0;
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  GESTÃO DE USUÁRIOS
- * ═══════════════════════════════════════════════════════════════ */
 
 void imprimir_usuario(const Usuario *u) {
     printf("  +---------------------------------------------------+\n");
@@ -601,9 +564,6 @@ void alterar_senha(void) {
     printf("\n  Senha alterada com sucesso.\n"); pausar();
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  IMPRESSÃO DE AGENDAMENTO
- * ═══════════════════════════════════════════════════════════════ */
 
 void imprimir_agendamento(const Agendamento *ag) {
     Usuario *cli  = buscar_id_usr(ag->id_cliente);
@@ -624,9 +584,6 @@ void imprimir_agendamento(const Agendamento *ag) {
     printf("  +---------------------------------------------------+\n");
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  DISPONIBILIDADE
- * ═══════════════════════════════════════════════════════════════ */
 
 int slot_ocupado(const char *data, int slot, int id_barbeiro, int ignorar_id) {
     for (int i = 0; i < total_ag; i++) {
@@ -640,9 +597,6 @@ int slot_ocupado(const char *data, int slot, int id_barbeiro, int ignorar_id) {
     return 0;
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  CRIAR AGENDAMENTO
- * ═══════════════════════════════════════════════════════════════ */
 
 void criar_agendamento(void) {
     cabecalho("NOVO AGENDAMENTO");
@@ -676,7 +630,6 @@ void criar_agendamento(void) {
         novo.id_cliente = logado->id;
     }
 
-    /* Data */
     char hoje[TAM_DATA];
     data_hoje(hoje);
     printf("\n  Hoje: %s\n", hoje);
@@ -686,7 +639,7 @@ void criar_agendamento(void) {
     if (cmp_data(data, hoje) < 0) { printf("  [!] Data no passado.\n"); pausar(); return; }
     strcpy(novo.data, data);
 
-    /* Servico */
+//serviços
     printf("\n");
     listar_servicos_tabela();
     int svc = ler_int("Escolha o servico [1-5]: ");
@@ -756,9 +709,6 @@ void criar_agendamento(void) {
     pausar();
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  LISTAR AGENDAMENTOS
- * ═══════════════════════════════════════════════════════════════ */
 
 void listar_agendamentos_filtrado(int id_cliente, int id_barbeiro,
                                    const char *data_filtro, int so_pendentes) {
@@ -826,9 +776,6 @@ void listar_todos_agendamentos(void) {
     pausar();
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  CANCELAR / CONCLUIR / EXCLUIR AGENDAMENTOS
- * ═══════════════════════════════════════════════════════════════ */
 
 Agendamento *buscar_ag_por_id(int id) {
     for (int i = 0; i < total_ag; i++)
@@ -919,9 +866,6 @@ void excluir_agendamento_permanente(void) {
     pausar();
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  RELATORIO (ADMIN)
- * ═══════════════════════════════════════════════════════════════ */
 
 void relatorio_admin(void) {
     cabecalho("RELATORIO GERAL");
@@ -970,11 +914,6 @@ void relatorio_admin(void) {
     pausar();
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  MENUS POR PERFIL
- * ═══════════════════════════════════════════════════════════════ */
-
-/* ────────────── MENU CLIENTE ────────────── */
 void menu_cliente(void) {
     int op;
     do {
@@ -1005,7 +944,7 @@ void menu_cliente(void) {
     logado = NULL;
 }
 
-/* ────────────── MENU BARBEIRO ────────────── */
+
 void menu_barbeiro(void) {
     int op;
     do {
@@ -1034,7 +973,6 @@ void menu_barbeiro(void) {
     logado = NULL;
 }
 
-/* ────────────── MENU ADMIN ────────────── */
 void menu_admin(void) {
     int op;
     do {
@@ -1076,9 +1014,6 @@ void menu_admin(void) {
     logado = NULL;
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  MENU PRINCIPAL
- * ═══════════════════════════════════════════════════════════════ */
 
 void menu_principal(void) {
     int op;
@@ -1104,10 +1039,6 @@ void menu_principal(void) {
         }
     } while (op != 0);
 }
-
-/* ═══════════════════════════════════════════════════════════════
- *  MAIN
- * ═══════════════════════════════════════════════════════════════ */
 
 int main(void) {
     carregar_usuarios();
