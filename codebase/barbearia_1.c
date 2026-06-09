@@ -1,25 +1,38 @@
+/*
+ * Sistema de Gestao de Barbearia v3.0
+ * Estruturas de Dados: Pilha (Stack) e Fila (Queue)
+ *
+ * PILHA (LIFO - Last In, First Out):
+ *   Usada para historico de acoes (ex: desfazer operacoes).
+ *   push() insere no topo | pop() remove do topo.
+ *
+ * FILA (FIFO - First In, First Out):
+ *   Usada para fila de espera de atendimento.
+ *   enqueue() insere no final | dequeue() remove do inicio.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 #include <time.h>
 
+/* ─── Constantes ─────────────────────────────────────────── */
+#define MAX_USR      100
+#define MAX_AG       500
+#define TAM_NOME      60
+#define TAM_CPF       15
+#define TAM_SENHA     30
+#define TAM_TEL       20
+#define TAM_DATA      11
+#define TAM_OBS       80
+#define MAX_FALHAS     5
+#define TOTAL_SLOTS   20
+#define N_SVC          5
 
-#define MAX_USUARIOS      100
-#define MAX_AGENDAMENTOS  500
-#define TAM_NOME           60
-#define TAM_CPF            15
-#define TAM_SENHA          30
-#define TAM_TELEFONE       20
-#define TAM_DATA           11
-#define TAM_OBS            80
+#define ARQ_USR  "usuarios.dat"
+#define ARQ_AG   "agendamentos.dat"
 
-#define ARQUIVO_USUARIOS     "usuarios.dat"
-#define ARQUIVO_AGENDAMENTOS "agendamentos.dat"
-
-/* Slots de 08:00 às 17:30, de 30 em 30 minutos */
-#define TOTAL_SLOTS  20
+/* ─── Slots de horario ───────────────────────────────────── */
 static const char *SLOTS[TOTAL_SLOTS] = {
     "08:00","08:30","09:00","09:30","10:00","10:30",
     "11:00","11:30","12:00","12:30","13:00","13:30",
@@ -27,69 +40,113 @@ static const char *SLOTS[TOTAL_SLOTS] = {
     "17:00","17:30"
 };
 
-typedef enum { CLIENTE = 1, BARBEIRO, ADMIN } TipoPerfil;
+/* ─── Enums ───────────────────────────────────────────────── */
+typedef enum { CLIENTE=1, BARBEIRO, ADMIN }              Perfil;
+typedef enum { SVC_CAB=1, SVC_SBH, SVC_CAB_SBH,
+               SVC_BARBA, SVC_CAB_BARBA }                Servico;
+typedef enum { AG_PEND=1, AG_OK, AG_CANCEL }             StatusAg;
 
-typedef enum {
-    SVC_CABELO       = 1,
-    SVC_SOBRANCELHA  = 2,
-    SVC_CABELO_SBH   = 3,
-    SVC_BARBA        = 4,
-    SVC_CABELO_BARBA = 5
-} TipoServico;
-
-typedef enum {
-    AG_PENDENTE  = 1,
-    AG_CONCLUIDO,
-    AG_CANCELADO
-} StatusAgendamento;
-
+/* ─── Structs principais ──────────────────────────────────── */
 typedef struct {
-    int        id;
-    char       nome[TAM_NOME];
-    char       cpf[TAM_CPF];
-    char       senha[TAM_SENHA];
-    char       telefone[TAM_TELEFONE];
-    TipoPerfil perfil;
-    int        ativo;
+    int id;
+    char nome[TAM_NOME], cpf[TAM_CPF],
+         senha[TAM_SENHA], tel[TAM_TEL];
+    Perfil perfil;
+    int ativo;
 } Usuario;
 
 typedef struct {
-    int               id;
-    int               id_cliente;
-    int               id_barbeiro;
-    char              data[TAM_DATA];
-    int               slot;
-    TipoServico       servico;
-    StatusAgendamento status;
-    char              obs[TAM_OBS];
-    int               ativo;
+    int id, id_cli, id_barb, slot;
+    char data[TAM_DATA], obs[TAM_OBS];
+    Servico svc;
+    StatusAg status;
+    int ativo;
 } Agendamento;
 
+typedef struct { Servico id; const char *nome; float preco; } InfoSvc;
+
+/* ─────────────────────────────────────────────────────────────
+ *  PILHA (Stack) — historico de IDs de agendamentos alterados
+ *  Principio LIFO: o ultimo elemento inserido e o primeiro removido.
+ * ──────────────────────────────────────────────────────────── */
+#define PILHA_MAX 50
 typedef struct {
-    TipoServico id;
-    const char *nome;
-    float       preco;
-} InfoServico;
+    int dados[PILHA_MAX];
+    int topo;           /* indice do proximo espaco livre */
+} Pilha;
 
-static Usuario     usuarios[MAX_USUARIOS];
-static int         total_usr   = 0;
-static int         prox_id_usr = 1;
+/* Inicializa pilha vazia (topo = 0) */
+static void pilha_init(Pilha *p) { p->topo = 0; }
 
-static Agendamento agendamentos[MAX_AGENDAMENTOS];
-static int         total_ag    = 0;
-static int         prox_id_ag  = 1;
+/* push: insere valor no topo; retorna 0 se cheia */
+static int pilha_push(Pilha *p, int val) {
+    if (p->topo >= PILHA_MAX) return 0;
+    p->dados[p->topo++] = val;  /* armazena e incrementa topo */
+    return 1;
+}
 
-static Usuario    *logado = NULL;
+/* pop: remove e retorna o valor do topo; retorna -1 se vazia */
+static int pilha_pop(Pilha *p) {
+    if (p->topo == 0) return -1;
+    return p->dados[--p->topo];  /* decrementa topo e retorna valor */
+}
 
-static const InfoServico SERVICOS[] = {
-    { SVC_CABELO,       "Corte de Cabelo",               40.0f },
-    { SVC_SOBRANCELHA,  "Corte de Sobrancelha",           5.0f },
-    { SVC_CABELO_SBH,   "Corte de Cabelo + Sobrancelha", 50.0f },
-    { SVC_BARBA,        "Corte de Barba",                30.0f },
-    { SVC_CABELO_BARBA, "Corte de Cabelo + Barba",       70.0f }
+/* ─────────────────────────────────────────────────────────────
+ *  FILA (Queue) — ordem de espera dos clientes
+ *  Principio FIFO: o primeiro elemento inserido e o primeiro removido.
+ * ──────────────────────────────────────────────────────────── */
+#define FILA_MAX 50
+typedef struct {
+    int dados[FILA_MAX];
+    int inicio, fim, tamanho;
+} Fila;
+
+/* Inicializa fila vazia */
+static void fila_init(Fila *f) { f->inicio = f->fim = f->tamanho = 0; }
+
+/* enqueue: insere no final da fila usando aritmetica circular */
+static int fila_enqueue(Fila *f, int val) {
+    if (f->tamanho >= FILA_MAX) return 0;
+    f->dados[f->fim] = val;
+    f->fim = (f->fim + 1) % FILA_MAX;  /* avanca circulando no array */
+    f->tamanho++;
+    return 1;
+}
+
+/* dequeue: remove e retorna o elemento do inicio da fila */
+static int fila_dequeue(Fila *f) {
+    if (f->tamanho == 0) return -1;
+    int val = f->dados[f->inicio];
+    f->inicio = (f->inicio + 1) % FILA_MAX;  /* avanca circulando */
+    f->tamanho--;
+    return val;
+}
+
+/* ─── Dados globais ───────────────────────────────────────── */
+static Usuario    usuarios[MAX_USR];
+static int        total_usr = 0, prox_id_usr = 1;
+static Agendamento agendamentos[MAX_AG];
+static int        total_ag = 0,  prox_id_ag  = 1;
+static Usuario   *logado = NULL;
+
+/* Estruturas de dados ativas */
+static Pilha historico;   /* pilha: IDs dos ultimos agendamentos alterados */
+static Fila  fila_espera; /* fila:  IDs de clientes aguardando atendimento  */
+
+/* ─── Tabela de servicos ──────────────────────────────────── */
+static const InfoSvc SVCS[N_SVC] = {
+    {SVC_CAB,      "Corte de Cabelo",              40.f},
+    {SVC_SBH,      "Corte de Sobrancelha",          5.f},
+    {SVC_CAB_SBH,  "Corte de Cabelo + Sobrancelha", 50.f},
+    {SVC_BARBA,    "Corte de Barba",               30.f},
+    {SVC_CAB_BARBA,"Corte de Cabelo + Barba",      70.f}
 };
-#define N_SERVICOS 5
 
+/* ─── Utilitarios basicos ─────────────────────────────────── */
+static int  eh_digito(char c)   { return c>='0' && c<='9'; }
+static int  eh_espaco(char c)   { return c==' '||c=='\n'||c=='\t'||c=='\r'; }
+static char minusculo(char c)   { return (c>='A'&&c<='Z') ? c+32 : c; }
+static void limpar_buf(void)    { int c; while((c=getchar())!='\n'&&c!=EOF); }
 
 void limpar_tela(void) {
 #ifdef _WIN32
@@ -101,959 +158,780 @@ void limpar_tela(void) {
 
 void pausar(void) {
     printf("\n  Pressione ENTER para continuar...");
-    while (getchar() != '\n');
+    fflush(stdout);
+    limpar_buf();
 }
 
-void linha(char c, int n) {
-    for (int i = 0; i < n; i++) putchar(c);
+static void linha(char c, int n) {
+    for (int i=0; i<n; i++) putchar(c);
     putchar('\n');
 }
 
-void cabecalho(const char *titulo) {
+void cabecalho(const char *t) {
     limpar_tela();
     linha('=', 60);
-    printf("  BARBEARIA SISTEMA  --  %s\n", titulo);
+    printf("  BARBEARIA  --  %s\n", t);
     linha('=', 60);
     putchar('\n');
 }
 
-void ler_string(const char *prompt, char *dest, int tam) {
-    printf("  %s", prompt);
+/* ─── Leitura de entrada ──────────────────────────────────── */
+int ler_str(const char *p, char *dest, int tam) {
+    printf("  %s", p);
     fflush(stdout);
-    if (fgets(dest, tam, stdin))
-        dest[strcspn(dest, "\n")] = '\0';
-}
-
-void ler_senha(const char *prompt, char *dest, int tam) {
-    printf("  %s", prompt);
-    fflush(stdout);
-    if (fgets(dest, tam, stdin))
-        dest[strcspn(dest, "\n")] = '\0';
-}
-
-int ler_int(const char *prompt) {
-    printf("  %s", prompt);
-    int v = 0;
-    if (scanf("%d", &v) != 1) v = 0;
-    while (getchar() != '\n');
-    return v;
-}
-
-
-/* Verifica apenas a máscara: "NNN.NNN.NNN-NN" ou 11 dígitos crus */
-int validar_cpf_formato(const char *cpf) {
-    int len = (int)strlen(cpf);
-    if (len == 14) {
-        for (int i = 0; i < 14; i++) {
-            if      (i == 3 || i == 7) { if (cpf[i] != '.') return 0; }
-            else if (i == 11)          { if (cpf[i] != '-') return 0; }
-            else                       { if (!isdigit((unsigned char)cpf[i])) return 0; }
-        }
-        return 1;
-    }
-    if (len == 11) {
-        for (int i = 0; i < 11; i++)
-            if (!isdigit((unsigned char)cpf[i])) return 0;
-        return 1;
-    }
-    return 0;
-}
-
-/*
- * Valida os dois dígitos verificadores do CPF.
- * Deve ser chamada APÓS formatar_cpf(), pois espera o formato
- * "NNN.NNN.NNN-NN" (ou 11 dígitos puros).
- *
- * Algoritmo:
- *   1º dígito: soma ponderada dos 9 primeiros dígitos (pesos 10..2),
- *              resto = soma % 11; dígito = (resto < 2) ? 0 : 11 - resto
- *   2º dígito: soma ponderada dos 10 primeiros dígitos (pesos 11..2),
- *              mesma regra de cálculo.
- *   Rejeita também CPFs com todos os dígitos iguais (ex.: 111.111.111-11).
- */
-int validar_cpf_digitos(const char *cpf_fmt) {
-    /* Extrai somente os dígitos */
-    char d[12] = {0};
-    int j = 0;
-    for (int i = 0; cpf_fmt[i] && j < 11; i++)
-        if (isdigit((unsigned char)cpf_fmt[i])) d[j++] = cpf_fmt[i];
-    if (j != 11) return 0;
-
-    /* Rejeita sequências como "111.111.111-11" */
-    int todos_iguais = 1;
-    for (int i = 1; i < 11; i++)
-        if (d[i] != d[0]) { todos_iguais = 0; break; }
-    if (todos_iguais) return 0;
-
-    /* 1º dígito verificador — pesos 10..2 sobre os 9 primeiros */
-    int soma = 0;
-    for (int i = 0; i < 9; i++)
-        soma += (d[i] - '0') * (10 - i);
-    int r = soma % 11;
-    int dig1 = (r < 2) ? 0 : 11 - r;
-    if ((d[9] - '0') != dig1) return 0;
-
-    /* 2º dígito verificador — pesos 11..2 sobre os 10 primeiros */
-    soma = 0;
-    for (int i = 0; i < 10; i++)
-        soma += (d[i] - '0') * (11 - i);
-    r = soma % 11;
-    int dig2 = (r < 2) ? 0 : 11 - r;
-    if ((d[10] - '0') != dig2) return 0;
-
+    dest[0] = '\0';
+    if (!fgets(dest, tam, stdin)) return 0;
+    int n = strlen(dest);
+    if (n>0 && dest[n-1]=='\n') dest[n-1]='\0';
+    else limpar_buf();
     return 1;
 }
 
-void formatar_cpf(const char *entrada, char *saida) {
-    char d[12] = {0}; int j = 0;
-    for (int i = 0; entrada[i] && j < 11; i++)
-        if (isdigit((unsigned char)entrada[i])) d[j++] = entrada[i];
-    snprintf(saida, TAM_CPF, "%c%c%c.%c%c%c.%c%c%c-%c%c",
-             d[0],d[1],d[2],d[3],d[4],d[5],d[6],d[7],d[8],d[9],d[10]);
+int ler_int(const char *p) {
+    char buf[32];
+    if (!ler_str(p, buf, sizeof(buf))) return -1;
+    return buf[0] ? atoi(buf) : 0;
 }
 
-int validar_data(const char *data) {
-    if ((int)strlen(data) != 10) return 0;
-    for (int i = 0; i < 10; i++) {
-        if (i == 2 || i == 5) { if (data[i] != '/') return 0; }
-        else { if (!isdigit((unsigned char)data[i])) return 0; }
+static int confirmar(const char *msg) {
+    char r[10];
+    printf("  %s (s/N): ", msg);
+    fflush(stdout);
+    if (!fgets(r, sizeof(r), stdin)) return 0;
+    if (!strchr(r,'\n')) limpar_buf();
+    return minusculo(r[0])=='s';
+}
+
+/* ─── Validacoes ─────────────────────────────────────────── */
+int validar_cpf(const char *in, char *out) {
+    char d[12]; int n=0;
+    for (int i=0; in[i]; i++) {
+        if (eh_digito(in[i])) { if(n<11) d[n++]=in[i]; else return 0; }
     }
-    int dd = atoi(data);
-    int mm = atoi(data + 3);
-    int aa = atoi(data + 6);
-    return (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12 && aa >= 2024);
+    if (n!=11) return 0;
+    /* verifica todos iguais */
+    int igual=1;
+    for (int i=1;i<11;i++) if(d[i]!=d[0]){igual=0;break;}
+    if (igual) return 0;
+    /* digito verificador 1 */
+    int s=0; for(int i=0;i<9;i++) s+=(d[i]-'0')*(10-i);
+    int r=(s*10)%11; if(r==10)r=0; if(r!=(d[9]-'0')) return 0;
+    /* digito verificador 2 */
+    s=0; for(int i=0;i<10;i++) s+=(d[i]-'0')*(11-i);
+    r=(s*10)%11; if(r==10)r=0; if(r!=(d[10]-'0')) return 0;
+    if(out) snprintf(out,TAM_CPF,"%c%c%c.%c%c%c.%c%c%c-%c%c",
+        d[0],d[1],d[2],d[3],d[4],d[5],d[6],d[7],d[8],d[9],d[10]);
+    return 1;
 }
 
+int validar_data(const char *d) {
+    if (!d || strlen(d)!=10 || d[2]!='/' || d[5]!='/') return 0;
+    for (int i=0;i<10;i++) if(i!=2&&i!=5&&!eh_digito(d[i])) return 0;
+    int dia=atoi(d), mes=atoi(d+3), ano=atoi(d+6);
+    if (mes<1||mes>12||ano<2024||dia<1) return 0;
+    int maxd = (mes==2) ? ((ano%4==0&&ano%100!=0)||(ano%400==0)?29:28)
+             : (mes==4||mes==6||mes==9||mes==11) ? 30 : 31;
+    return dia<=maxd;
+}
+
+int validar_tel(const char *t) {
+    if (!t||!t[0]) return 0;
+    int n=0;
+    for(int i=0;t[i];i++) {
+        if(eh_digito(t[i])) n++;
+        else if(t[i]!='('&&t[i]!=')'&&t[i]!=' '&&t[i]!='-'&&t[i]!='+') return 0;
+    }
+    return n>=10&&n<=11;
+}
+
+int str_valida(const char *s, int min) {
+    if(!s) return 0;
+    int c=0; for(int i=0;s[i];i++) if(!eh_espaco(s[i])) c++;
+    return c>=min;
+}
+
+/* ─── Data de hoje ────────────────────────────────────────── */
 void data_hoje(char *buf) {
-    time_t t = time(NULL);
-    struct tm *tm_info = localtime(&t);
-    snprintf(buf, TAM_DATA, "%02d/%02d/%04d",
-             tm_info->tm_mday, tm_info->tm_mon + 1, tm_info->tm_year + 1900);
+    time_t t=time(NULL); struct tm *tm=localtime(&t);
+    snprintf(buf,TAM_DATA,"%02d/%02d/%04d",
+        tm->tm_mday, tm->tm_mon+1, tm->tm_year+1900);
 }
 
-/* Converte DD/MM/AAAA para AAAAMMDD para comparação */
+/* Compara datas no formato DD/MM/AAAA */
 int cmp_data(const char *a, const char *b) {
-    char fa[9], fb[9];
-    snprintf(fa, 9, "%c%c%c%c%c%c%c%c",
-             a[6],a[7],a[8],a[9],a[3],a[4],a[0],a[1]);
-    snprintf(fb, 9, "%c%c%c%c%c%c%c%c",
-             b[6],b[7],b[8],b[9],b[3],b[4],b[0],b[1]);
-    return strcmp(fa, fb);
+    int r=strcmp(a+6,b+6); if(r) return r;
+    r=strncmp(a+3,b+3,2);  if(r) return r;
+    return strncmp(a,b,2);
 }
 
-const InfoServico *info_servico(TipoServico s) {
-    for (int i = 0; i < N_SERVICOS; i++)
-        if (SERVICOS[i].id == s) return &SERVICOS[i];
-    return &SERVICOS[0];
+/* ─── Helpers de lookup ───────────────────────────────────── */
+const InfoSvc *get_svc(Servico s) {
+    return (s>=1&&s<=N_SVC) ? &SVCS[s-1] : &SVCS[0];
+}
+const char *str_perfil(Perfil p) {
+    return p==ADMIN?"Admin":p==BARBEIRO?"Barbeiro":"Cliente";
+}
+const char *str_status(StatusAg s) {
+    return s==AG_PEND?"Pendente":s==AG_OK?"Concluido":"Cancelado";
 }
 
-void listar_servicos_tabela(void) {
+/* ─── Persistencia ────────────────────────────────────────── */
+void salvar_usr(void) {
+    FILE *f=fopen(ARQ_USR,"wb");
+    if(!f){puts("  [ERRO] Nao salvou usuarios.");return;}
+    fwrite(&total_usr,sizeof(int),1,f);
+    fwrite(&prox_id_usr,sizeof(int),1,f);
+    fwrite(usuarios,sizeof(Usuario),total_usr,f);
+    fclose(f);
+}
+
+void salvar_ag(void) {
+    FILE *f=fopen(ARQ_AG,"wb");
+    if(!f){puts("  [ERRO] Nao salvou agendamentos.");return;}
+    fwrite(&total_ag,sizeof(int),1,f);
+    fwrite(&prox_id_ag,sizeof(int),1,f);
+    fwrite(agendamentos,sizeof(Agendamento),total_ag,f);
+    fclose(f);
+}
+
+static void criar_admin(void) {
+    Usuario a={0};
+    a.id=prox_id_usr++;
+    strcpy(a.nome,"Administrador");
+    strcpy(a.cpf,"065.974.841-00");
+    strcpy(a.senha,"adm123");
+    strcpy(a.tel,"(00) 00000-0000");
+    a.perfil=ADMIN; a.ativo=1;
+    usuarios[total_usr++]=a;
+    salvar_usr();
+}
+
+void carregar_usr(void) {
+    FILE *f=fopen(ARQ_USR,"rb");
+    if(!f){criar_admin();return;}
+    fread(&total_usr,sizeof(int),1,f);
+    fread(&prox_id_usr,sizeof(int),1,f);
+    if(total_usr<0||total_usr>MAX_USR) { total_usr=0;prox_id_usr=1;criar_admin(); }
+    else fread(usuarios,sizeof(Usuario),total_usr,f);
+    fclose(f);
+}
+
+void carregar_ag(void) {
+    FILE *f=fopen(ARQ_AG,"rb");
+    if(!f) return;
+    fread(&total_ag,sizeof(int),1,f);
+    fread(&prox_id_ag,sizeof(int),1,f);
+    if(total_ag<0||total_ag>MAX_AG) puts("  [AVISO] Agendamentos corrompidos.");
+    else fread(agendamentos,sizeof(Agendamento),total_ag,f);
+    fclose(f);
+}
+
+/* ─── Buscas ──────────────────────────────────────────────── */
+Usuario    *buscar_cpf(const char *cpf) {
+    for(int i=0;i<total_usr;i++)
+        if(usuarios[i].ativo && !strcmp(usuarios[i].cpf,cpf)) return &usuarios[i];
+    return NULL;
+}
+Usuario    *buscar_usr(int id) {
+    for(int i=0;i<total_usr;i++)
+        if(usuarios[i].ativo && usuarios[i].id==id) return &usuarios[i];
+    return NULL;
+}
+Agendamento *buscar_ag(int id) {
+    for(int i=0;i<total_ag;i++)
+        if(agendamentos[i].ativo && agendamentos[i].id==id) return &agendamentos[i];
+    return NULL;
+}
+
+/* ─── Impressao ───────────────────────────────────────────── */
+void print_usr(const Usuario *u) {
+    if(!u) return;
+    printf("  +---------------------------------------------------+\n");
+    printf("  | ID     : %-38d  |\n", u->id);
+    printf("  | Nome   : %-38s  |\n", u->nome);
+    printf("  | CPF    : %-38s  |\n", u->cpf);
+    printf("  | Tel.   : %-38s  |\n", u->tel);
+    printf("  | Perfil : %-38s  |\n", str_perfil(u->perfil));
+    printf("  +---------------------------------------------------+\n");
+}
+
+void print_ag(const Agendamento *ag) {
+    if(!ag) return;
+    const char *hor = (ag->slot>=0&&ag->slot<TOTAL_SLOTS)?SLOTS[ag->slot]:"??:??";
+    Usuario *cli = buscar_usr(ag->id_cli);
+    Usuario *bar = ag->id_barb ? buscar_usr(ag->id_barb) : NULL;
+    const InfoSvc *s = get_svc(ag->svc);
+    printf("  +---------------------------------------------------+\n");
+    printf("  | ID Ag.    : %-38d  |\n", ag->id);
+    printf("  | Data      : %-38s  |\n", ag->data);
+    printf("  | Horario   : %-38s  |\n", hor);
+    printf("  | Servico   : %-38s  |\n", s->nome);
+    printf("  | Valor     : R$ %-35.2f  |\n", (double)s->preco);
+    printf("  | Cliente   : %-38s  |\n", cli?cli->nome:"?");
+    printf("  | Barbeiro  : %-38s  |\n", bar?bar->nome:"Qualquer disponivel");
+    printf("  | Status    : %-38s  |\n", str_status(ag->status));
+    if(ag->obs[0]) printf("  | Obs.      : %-38s  |\n", ag->obs);
+    printf("  +---------------------------------------------------+\n");
+}
+
+void listar_svcs(void) {
     printf("  +------+-------------------------------------+---------+\n");
     printf("  |  No  |  Servico                            |  Preco  |\n");
     printf("  +------+-------------------------------------+---------+\n");
-    for (int i = 0; i < N_SERVICOS; i++)
+    for(int i=0;i<N_SVC;i++)
         printf("  |  %-3d |  %-35s |  R$%3.0f  |\n",
-               SERVICOS[i].id, SERVICOS[i].nome, (double)SERVICOS[i].preco);
+               SVCS[i].id, SVCS[i].nome, (double)SVCS[i].preco);
     printf("  +------+-------------------------------------+---------+\n");
 }
 
-
-void salvar_usuarios(void) {
-    FILE *f = fopen(ARQUIVO_USUARIOS, "wb");
-    if (!f) { printf("  [ERRO] Nao salvou usuarios.\n"); return; }
-    fwrite(&total_usr,   sizeof(int), 1, f);
-    fwrite(&prox_id_usr, sizeof(int), 1, f);
-    fwrite(usuarios,     sizeof(Usuario), total_usr, f);
-    fclose(f);
+/* ─── Validacao de CPF com prompt ────────────────────────── */
+static int ler_cpf(const char *prompt, char *saida, int permite_adm) {
+    char raw[TAM_CPF];
+    if(!ler_str(prompt,raw,TAM_CPF)||!raw[0]){puts("  [!] Entrada vazia.");return 0;}
+    if(!validar_cpf(raw,saida)){puts("  [!] CPF invalido.");return 0;}
+    if(!permite_adm&&!strcmp(saida,"065.974.841-00")){puts("  [!] CPF reservado.");return 0;}
+    return 1;
 }
 
-void salvar_agendamentos(void) {
-    FILE *f = fopen(ARQUIVO_AGENDAMENTOS, "wb");
-    if (!f) { printf("  [ERRO] Nao salvou agendamentos.\n"); return; }
-    fwrite(&total_ag,    sizeof(int), 1, f);
-    fwrite(&prox_id_ag,  sizeof(int), 1, f);
-    fwrite(agendamentos, sizeof(Agendamento), total_ag, f);
-    fclose(f);
-}
-
-void carregar_usuarios(void) {
-    FILE *f = fopen(ARQUIVO_USUARIOS, "rb");
-    if (!f) {
-        Usuario admin = {0};
-        admin.id = prox_id_usr++;
-        strcpy(admin.nome,     "Administrador");
-        strcpy(admin.cpf,      "000.000.000-00");
-        strcpy(admin.senha,    "admin123");
-        strcpy(admin.telefone, "(00) 00000-0000");
-        admin.perfil = ADMIN;
-        admin.ativo  = 1;
-        usuarios[total_usr++] = admin;
-        salvar_usuarios();
-        return;
-    }
-    fread(&total_usr,   sizeof(int), 1, f);
-    fread(&prox_id_usr, sizeof(int), 1, f);
-    fread(usuarios,     sizeof(Usuario), total_usr, f);
-    fclose(f);
-}
-
-void carregar_agendamentos(void) {
-    FILE *f = fopen(ARQUIVO_AGENDAMENTOS, "rb");
-    if (!f) return;
-    fread(&total_ag,    sizeof(int), 1, f);
-    fread(&prox_id_ag,  sizeof(int), 1, f);
-    fread(agendamentos, sizeof(Agendamento), total_ag, f);
-    fclose(f);
-}
-
-
-Usuario *buscar_cpf(const char *cpf) {
-    for (int i = 0; i < total_usr; i++)
-        if (usuarios[i].ativo && strcmp(usuarios[i].cpf, cpf) == 0)
-            return &usuarios[i];
-    return NULL;
-}
-
-Usuario *buscar_id_usr(int id) {
-    for (int i = 0; i < total_usr; i++)
-        if (usuarios[i].ativo && usuarios[i].id == id)
-            return &usuarios[i];
-    return NULL;
-}
-
-const char *nome_perfil(TipoPerfil p) {
-    switch (p) {
-        case CLIENTE:  return "Cliente";
-        case BARBEIRO: return "Barbeiro";
-        case ADMIN:    return "Admin";
-        default:       return "?";
-    }
-}
-
-const char *status_str(StatusAgendamento s) {
-    switch (s) {
-        case AG_PENDENTE:  return "Pendente";
-        case AG_CONCLUIDO: return "Concluido";
-        case AG_CANCELADO: return "Cancelado";
-        default:           return "?";
-    }
-}
-
-
+/* ─── Login ───────────────────────────────────────────────── */
 int fazer_login(void) {
+    static int falhas=0;
+    if(falhas>=MAX_FALHAS){puts("  [!] Bloqueado. Reinicie.");pausar();return 0;}
     cabecalho("LOGIN");
-    char cpf_raw[TAM_CPF], cpf_fmt[TAM_CPF], senha[TAM_SENHA];
-
-    ler_string("CPF   : ", cpf_raw, TAM_CPF);
-    if (!validar_cpf_formato(cpf_raw)) {
-        printf("\n  [!] Formato de CPF invalido.\n"); pausar(); return 0;
+    char cpf_r[TAM_CPF], cpf_f[TAM_CPF], senha[TAM_SENHA];
+    if(!ler_str("CPF   : ",cpf_r,TAM_CPF)||!validar_cpf(cpf_r,cpf_f)){
+        puts("  [!] CPF invalido.");pausar();return 0;
     }
-    formatar_cpf(cpf_raw, cpf_fmt);
-
-    /* O CPF do admin (000.000.000-00) é especial: pula a validação de dígitos */
-    if (strcmp(cpf_fmt, "000.000.000-00") != 0 && !validar_cpf_digitos(cpf_fmt)) {
-        printf("\n  [!] CPF invalido (digitos verificadores incorretos).\n");
-        pausar(); return 0;
+    if(!ler_str("Senha : ",senha,TAM_SENHA)||!senha[0]){
+        puts("  [!] Senha vazia.");pausar();return 0;
     }
-
-    ler_senha("Senha : ", senha, TAM_SENHA);
-
-    Usuario *u = buscar_cpf(cpf_fmt);
-    if (u && strcmp(u->senha, senha) == 0) {
-        logado = u;
-        printf("\n  Bem-vindo, %s! [%s]\n", u->nome, nome_perfil(u->perfil));
-        pausar(); return 1;
+    Usuario *u=buscar_cpf(cpf_f);
+    if(u&&!strcmp(u->senha,senha)){
+        falhas=0; logado=u;
+        printf("\n  Bem-vindo, %s! [%s]\n",u->nome,str_perfil(u->perfil));
+        pausar();return 1;
     }
-    printf("\n  [!] CPF ou senha incorretos.\n");
-    pausar(); return 0;
+    printf("\n  [!] CPF ou senha incorretos. Restantes: %d\n",MAX_FALHAS-++falhas);
+    pausar();return 0;
 }
 
+/* ─── Cadastro de usuario ─────────────────────────────────── */
+static void cadastrar_interno(int perfil_fixo, int nivel_max) {
+    cabecalho(perfil_fixo==BARBEIRO?"CADASTRAR BARBEIRO":"CADASTRO");
+    if(total_usr>=MAX_USR){puts("  [!] Limite atingido.");pausar();return;}
+    Usuario u={0};
+    char cpf_f[TAM_CPF], conf[TAM_SENHA];
+    if(!ler_str("Nome completo  : ",u.nome,TAM_NOME)||!str_valida(u.nome,3)){
+        puts("  [!] Nome invalido.");pausar();return;
+    }
+    if(!ler_cpf("CPF            : ",cpf_f,0)){pausar();return;}
+    if(buscar_cpf(cpf_f)){puts("  [!] CPF ja cadastrado.");pausar();return;}
+    strcpy(u.cpf,cpf_f);
+    if(!ler_str("Senha          : ",u.senha,TAM_SENHA)||strlen(u.senha)<4){
+        puts("  [!] Senha minima 4 chars.");pausar();return;
+    }
+    if(!ler_str("Confirma senha : ",conf,TAM_SENHA)||strcmp(u.senha,conf)){
+        puts("  [!] Senhas nao conferem.");pausar();return;
+    }
+    if(!ler_str("Telefone       : ",u.tel,TAM_TEL)||!validar_tel(u.tel)){
+        puts("  [!] Telefone invalido.");pausar();return;
+    }
+    if(perfil_fixo) {
+        u.perfil=(Perfil)perfil_fixo;
+    } else {
+        printf("\n  Perfil: 1-Cliente");
+        if(nivel_max>=2) printf("  2-Barbeiro");
+        if(nivel_max>=3) printf("  3-Admin");
+        putchar('\n');
+        int op=ler_int("Opcao [1]: ");
+        u.perfil=(op>=1&&op<=nivel_max)?(Perfil)op:CLIENTE;
+    }
+    u.id=prox_id_usr++; u.ativo=1;
+    usuarios[total_usr++]=u;
+    salvar_usr();
 
-void imprimir_usuario(const Usuario *u) {
-    printf("  +---------------------------------------------------+\n");
-    printf("  | ID      : %-38d  |\n", u->id);
-    printf("  | Nome    : %-38s  |\n", u->nome);
-    printf("  | CPF     : %-38s  |\n", u->cpf);
-    printf("  | Tel.    : %-38s  |\n", u->telefone);
-    printf("  | Perfil  : %-38s  |\n", nome_perfil(u->perfil));
-    printf("  +---------------------------------------------------+\n");
-}
-
-void cadastrar_usuario(void) {
-    cabecalho("CADASTRO DE USUARIO");
-    if (total_usr >= MAX_USUARIOS) {
-        printf("  [!] Limite atingido.\n"); pausar(); return;
+    /* Adiciona cliente na fila de espera (demonstracao de FILA) */
+    if(u.perfil==CLIENTE) {
+        if(fila_enqueue(&fila_espera, u.id))
+            printf("\n  Cliente adicionado a fila de espera. (FILA - enqueue)\n");
     }
 
-    Usuario novo = {0};
-    char cpf_raw[TAM_CPF], cpf_fmt[TAM_CPF], confirma[TAM_SENHA];
-
-    ler_string("Nome completo  : ", novo.nome, TAM_NOME);
-    if (strlen(novo.nome) < 3) { printf("  [!] Nome muito curto.\n"); pausar(); return; }
-
-    ler_string("CPF            : ", cpf_raw, TAM_CPF);
-    if (!validar_cpf_formato(cpf_raw)) {
-        printf("  [!] CPF invalido.\n"); pausar(); return;
-    }
-    formatar_cpf(cpf_raw, cpf_fmt);
-    if (!validar_cpf_digitos(cpf_fmt)) {
-        printf("  [!] CPF invalido (digitos verificadores incorretos).\n");
-        pausar(); return;
-    }
-    if (buscar_cpf(cpf_fmt)) { printf("  [!] CPF ja cadastrado.\n"); pausar(); return; }
-    strcpy(novo.cpf, cpf_fmt);
-
-    ler_senha("Senha          : ", novo.senha, TAM_SENHA);
-    if (strlen(novo.senha) < 4) { printf("  [!] Minimo 4 caracteres.\n"); pausar(); return; }
-    ler_senha("Confirma senha : ", confirma, TAM_SENHA);
-    if (strcmp(novo.senha, confirma) != 0) { printf("  [!] Senhas diferentes.\n"); pausar(); return; }
-
-    ler_string("Telefone       : ", novo.telefone, TAM_TELEFONE);
-
-    int perfil_max = (logado && logado->perfil == ADMIN) ? 3 : 1;
-    printf("\n  Perfil:\n    1 - Cliente\n");
-    if (perfil_max >= 2) printf("    2 - Barbeiro\n");
-    if (perfil_max >= 3) printf("    3 - Admin\n");
-    int op = ler_int("Opcao [1]: ");
-    if (op < 1 || op > perfil_max) op = 1;
-    novo.perfil = (TipoPerfil)op;
-
-    novo.id    = prox_id_usr++;
-    novo.ativo = 1;
-    usuarios[total_usr++] = novo;
-    salvar_usuarios();
-    printf("\n  Cadastro realizado! (ID: %d)\n", novo.id);
+    printf("\n  Cadastro realizado! (ID: %d)\n",u.id);
     pausar();
 }
 
-void cadastrar_barbeiro(void) {
-    cabecalho("CADASTRAR BARBEIRO");
-    if (total_usr >= MAX_USUARIOS) {
-        printf("  [!] Limite de usuarios atingido.\n"); pausar(); return;
-    }
+void cadastrar_usr(void)   { cadastrar_interno(0, logado&&logado->perfil==ADMIN?3:1); }
+void cadastrar_barb(void)  { cadastrar_interno(BARBEIRO,0); }
 
-    Usuario novo = {0};
-    char cpf_raw[TAM_CPF], cpf_fmt[TAM_CPF], confirma[TAM_SENHA];
-
-    ler_string("Nome completo  : ", novo.nome, TAM_NOME);
-    if (strlen(novo.nome) < 3) { printf("  [!] Nome muito curto.\n"); pausar(); return; }
-
-    ler_string("CPF            : ", cpf_raw, TAM_CPF);
-    if (!validar_cpf_formato(cpf_raw)) {
-        printf("  [!] CPF invalido.\n"); pausar(); return;
-    }
-    formatar_cpf(cpf_raw, cpf_fmt);
-    if (!validar_cpf_digitos(cpf_fmt)) {
-        printf("  [!] CPF invalido (digitos verificadores incorretos).\n");
-        pausar(); return;
-    }
-    if (buscar_cpf(cpf_fmt)) { printf("  [!] CPF ja cadastrado.\n"); pausar(); return; }
-    strcpy(novo.cpf, cpf_fmt);
-
-    ler_senha("Senha          : ", novo.senha, TAM_SENHA);
-    if (strlen(novo.senha) < 4) { printf("  [!] Minimo 4 caracteres.\n"); pausar(); return; }
-    ler_senha("Confirma senha : ", confirma, TAM_SENHA);
-    if (strcmp(novo.senha, confirma) != 0) { printf("  [!] Senhas diferentes.\n"); pausar(); return; }
-
-    ler_string("Telefone       : ", novo.telefone, TAM_TELEFONE);
-
-    novo.perfil = BARBEIRO;
-    novo.id     = prox_id_usr++;
-    novo.ativo  = 1;
-    usuarios[total_usr++] = novo;
-    salvar_usuarios();
-    printf("\n  Barbeiro cadastrado com sucesso! (ID: %d)\n", novo.id);
-    pausar();
-}
-
-void listar_usuarios(void) {
+/* ─── Listagem / busca de usuarios ──────────────────────────*/
+void listar_usr(void) {
     cabecalho("LISTA DE USUARIOS");
-    int ok = 0;
-    for (int i = 0; i < total_usr; i++)
-        if (usuarios[i].ativo) { imprimir_usuario(&usuarios[i]); putchar('\n'); ok = 1; }
-    if (!ok) printf("  Nenhum usuario cadastrado.\n");
+    int found=0;
+    for(int i=0;i<total_usr;i++)
+        if(usuarios[i].ativo){print_usr(&usuarios[i]);putchar('\n');found=1;}
+    if(!found) puts("  Nenhum usuario ativo.");
     pausar();
 }
 
 void buscar_usuario(void) {
     cabecalho("BUSCAR USUARIO");
     printf("  1 - Por CPF\n  2 - Por ID\n");
-    int op = ler_int("Opcao: ");
-    Usuario *u = NULL;
-    if (op == 1) {
-        char r[TAM_CPF], f[TAM_CPF];
-        ler_string("CPF: ", r, TAM_CPF);
-        if (!validar_cpf_formato(r)) { printf("  [!] CPF invalido.\n"); pausar(); return; }
-        formatar_cpf(r, f);
-        if (!validar_cpf_digitos(f)) {
-            printf("  [!] CPF invalido (digitos verificadores incorretos).\n");
-            pausar(); return;
-        }
-        u = buscar_cpf(f);
-    } else {
-        int id = ler_int("ID: "); u = buscar_id_usr(id);
-    }
-    if (u) { putchar('\n'); imprimir_usuario(u); }
-    else     printf("  [!] Nao encontrado.\n");
+    int op=ler_int("Opcao: ");
+    Usuario *u=NULL;
+    if(op==1){
+        char cpf[TAM_CPF];
+        if(!ler_cpf("CPF: ",cpf,1)){pausar();return;}
+        u=buscar_cpf(cpf);
+    } else if(op==2){
+        int id=ler_int("ID: ");
+        if(id>0) u=buscar_usr(id);
+    } else {puts("  [!] Opcao invalida.");}
+    if(u){putchar('\n');print_usr(u);}
+    else puts("  [!] Nao encontrado.");
     pausar();
 }
 
-void excluir_usuario(void) {
+/* ─── Excluir usuario ─────────────────────────────────────── */
+void excluir_usr(void) {
     cabecalho("EXCLUIR USUARIO");
-    char r[TAM_CPF], f[TAM_CPF], senha[TAM_SENHA];
-
-    ler_string("CPF do usuario: ", r, TAM_CPF);
-    if (!validar_cpf_formato(r)) { printf("  [!] CPF invalido.\n"); pausar(); return; }
-    formatar_cpf(r, f);
-
-    /* CPF do admin (000.000.000-00) dispensa validação de dígitos */
-    if (strcmp(f, "000.000.000-00") != 0 && !validar_cpf_digitos(f)) {
-        printf("  [!] CPF invalido (digitos verificadores incorretos).\n");
-        pausar(); return;
-    }
-
-    Usuario *u = buscar_cpf(f);
-    if (!u) { printf("  [!] Usuario nao encontrado.\n"); pausar(); return; }
-
-    if (!logado || logado->perfil != ADMIN) {
-        ler_senha("Confirme sua senha: ", senha, TAM_SENHA);
-        if (strcmp(u->senha, senha) != 0) { printf("  [!] Senha incorreta.\n"); pausar(); return; }
-    }
-    if (u->perfil == ADMIN) {
-        int nadm = 0;
-        for (int i = 0; i < total_usr; i++)
-            if (usuarios[i].ativo && usuarios[i].perfil == ADMIN) nadm++;
-        if (nadm <= 1) {
-            printf("  [!] Impossivel excluir o unico administrador.\n");
-            pausar(); return;
+    char cpf[TAM_CPF];
+    if(!ler_cpf("CPF: ",cpf,1)){pausar();return;}
+    Usuario *u=buscar_cpf(cpf);
+    if(!u){puts("  [!] Nao encontrado.");pausar();return;}
+    if(!logado||logado->perfil!=ADMIN){
+        char sv[TAM_SENHA];
+        if(!ler_str("Confirme sua senha: ",sv,TAM_SENHA)||strcmp(u->senha,sv)){
+            puts("  [!] Senha incorreta.");pausar();return;
         }
     }
-    putchar('\n'); imprimir_usuario(u);
-    printf("\n  Confirmar exclusao? (s/N): ");
-    char conf[4]; fgets(conf, sizeof(conf), stdin);
-    if (tolower((unsigned char)conf[0]) != 's') {
-        printf("  Cancelado.\n"); pausar(); return;
+    if(u->perfil==ADMIN){
+        int adm=0;
+        for(int i=0;i<total_usr;i++) if(usuarios[i].ativo&&usuarios[i].perfil==ADMIN) adm++;
+        if(adm<=1){puts("  [!] Unico admin.");pausar();return;}
     }
-
-    /* Cancela agendamentos pendentes do usuario */
-    for (int i = 0; i < total_ag; i++)
-        if (agendamentos[i].ativo && agendamentos[i].id_cliente == u->id
-            && agendamentos[i].status == AG_PENDENTE)
-            agendamentos[i].status = AG_CANCELADO;
-    salvar_agendamentos();
-
-    u->ativo = 0;
-    if (logado && logado->id == u->id) logado = NULL;
-    salvar_usuarios();
-    printf("\n  Usuario excluido.\n");
+    putchar('\n'); print_usr(u);
+    if(!confirmar("\n  Confirmar exclusao?")){puts("  Cancelado.");pausar();return;}
+    /* cancela agendamentos pendentes do usuario */
+    for(int i=0;i<total_ag;i++)
+        if(agendamentos[i].ativo&&agendamentos[i].id_cli==u->id&&agendamentos[i].status==AG_PEND)
+            agendamentos[i].status=AG_CANCEL;
+    salvar_ag();
+    u->ativo=0;
+    if(logado&&logado->id==u->id) logado=NULL;
+    salvar_usr();
+    puts("\n  Usuario excluido.");
     pausar();
 }
 
+/* ─── Alterar senha ───────────────────────────────────────── */
 void alterar_senha(void) {
     cabecalho("ALTERAR SENHA");
-    if (!logado) { printf("  [!] Nenhum usuario logado.\n"); pausar(); return; }
+    if(!logado){puts("  [!] Faca login primeiro.");pausar();return;}
     char atual[TAM_SENHA], nova[TAM_SENHA], conf[TAM_SENHA];
-    ler_senha("Senha atual   : ", atual, TAM_SENHA);
-    if (strcmp(logado->senha, atual) != 0) { printf("  [!] Senha incorreta.\n"); pausar(); return; }
-    ler_senha("Nova senha    : ", nova, TAM_SENHA);
-    if (strlen(nova) < 4) { printf("  [!] Minimo 4 caracteres.\n"); pausar(); return; }
-    ler_senha("Confirma      : ", conf, TAM_SENHA);
-    if (strcmp(nova, conf) != 0) { printf("  [!] Senhas diferentes.\n"); pausar(); return; }
-    strcpy(logado->senha, nova);
-    salvar_usuarios();
-    printf("\n  Senha alterada com sucesso.\n"); pausar();
-}
-
-
-void imprimir_agendamento(const Agendamento *ag) {
-    Usuario *cli  = buscar_id_usr(ag->id_cliente);
-    Usuario *barb = ag->id_barbeiro ? buscar_id_usr(ag->id_barbeiro) : NULL;
-    const InfoServico *svc = info_servico(ag->servico);
-
-    printf("  +---------------------------------------------------+\n");
-    printf("  | ID Agend. : %-38d  |\n", ag->id);
-    printf("  | Data      : %-38s  |\n", ag->data);
-    printf("  | Horario   : %-38s  |\n", SLOTS[ag->slot]);
-    printf("  | Servico   : %-38s  |\n", svc->nome);
-    printf("  | Valor     : R$ %-35.2f  |\n", (double)svc->preco);
-    printf("  | Cliente   : %-38s  |\n", cli ? cli->nome : "?");
-    printf("  | Barbeiro  : %-38s  |\n", barb ? barb->nome : "Qualquer disponivel");
-    printf("  | Status    : %-38s  |\n", status_str(ag->status));
-    if (ag->obs[0])
-        printf("  | Obs.      : %-38s  |\n", ag->obs);
-    printf("  +---------------------------------------------------+\n");
-}
-
-
-int slot_ocupado(const char *data, int slot, int id_barbeiro, int ignorar_id) {
-    for (int i = 0; i < total_ag; i++) {
-        Agendamento *ag = &agendamentos[i];
-        if (!ag->ativo || ag->id == ignorar_id) continue;
-        if (ag->status == AG_CANCELADO) continue;
-        if (strcmp(ag->data, data) != 0 || ag->slot != slot) continue;
-        if (id_barbeiro > 0 && ag->id_barbeiro > 0 && ag->id_barbeiro != id_barbeiro) continue;
-        return 1;
+    if(!ler_str("Senha atual   : ",atual,TAM_SENHA)||strcmp(logado->senha,atual)){
+        puts("  [!] Senha incorreta.");pausar();return;
     }
-    return 0;
+    if(!ler_str("Nova senha    : ",nova,TAM_SENHA)||strlen(nova)<4){
+        puts("  [!] Minimo 4 chars.");pausar();return;
+    }
+    if(!strcmp(nova,logado->senha)){puts("  [!] Igual a atual.");pausar();return;}
+    if(!ler_str("Confirme nova : ",conf,TAM_SENHA)||strcmp(nova,conf)){
+        puts("  [!] Senhas divergem.");pausar();return;
+    }
+    strcpy(logado->senha,nova);
+    salvar_usr();
+    puts("\n  Senha alterada com sucesso.");
+    pausar();
 }
 
+/* ─── Agendamentos ────────────────────────────────────────── */
+int slot_livre(const char *data, int slot, int id_barb, int ignorar) {
+    for(int i=0;i<total_ag;i++){
+        Agendamento *a=&agendamentos[i];
+        if(a->ativo&&a->id!=ignorar&&a->status!=AG_CANCEL&&
+           !strcmp(a->data,data)&&a->slot==slot)
+            if(id_barb<=0||a->id_barb<=0||a->id_barb==id_barb) return 0;
+    }
+    return 1;
+}
 
-void criar_agendamento(void) {
+void listar_ags(int id_cli, int id_barb, const char *data, int so_pend) {
+    int found=0;
+    for(int i=0;i<total_ag;i++){
+        Agendamento *a=&agendamentos[i];
+        if(!a->ativo) continue;
+        if(id_cli>0&&a->id_cli!=id_cli) continue;
+        if(id_barb>0&&a->id_barb!=id_barb) continue;
+        if(data&&data[0]&&strcmp(a->data,data)) continue;
+        if(so_pend&&a->status!=AG_PEND) continue;
+        print_ag(a); putchar('\n'); found=1;
+    }
+    if(!found) puts("  Nenhum agendamento encontrado.");
+}
+
+void criar_ag(void) {
     cabecalho("NOVO AGENDAMENTO");
-
-    if (total_ag >= MAX_AGENDAMENTOS) {
-        printf("  [!] Limite de agendamentos atingido.\n"); pausar(); return;
-    }
-
-    Agendamento novo = {0};
-
-    /* Define o cliente */
-    if (logado->perfil == ADMIN) {
-        printf("  Agendar para:\n    1 - Mim mesmo\n    2 - Um cliente (CPF)\n");
-        int op = ler_int("Opcao: ");
-        if (op == 2) {
-            char r[TAM_CPF], f[TAM_CPF];
-            ler_string("CPF do cliente: ", r, TAM_CPF);
-            if (!validar_cpf_formato(r)) { printf("  [!] CPF invalido.\n"); pausar(); return; }
-            formatar_cpf(r, f);
-            if (!validar_cpf_digitos(f)) {
-                printf("  [!] CPF invalido (digitos verificadores incorretos).\n");
-                pausar(); return;
-            }
-            Usuario *cli = buscar_cpf(f);
-            if (!cli) { printf("  [!] Cliente nao encontrado.\n"); pausar(); return; }
-            novo.id_cliente = cli->id;
-        } else {
-            novo.id_cliente = logado->id;
+    if(!logado){puts("  [!] Nenhum usuario logado.");pausar();return;}
+    if(total_ag>=MAX_AG){puts("  [!] Limite atingido.");pausar();return;}
+    Agendamento a={0};
+    /* define cliente */
+    if(logado->perfil==ADMIN){
+        printf("  1-Para voce  2-Para um cliente\n");
+        int op=ler_int("Opcao: ");
+        if(op==2){
+            char cpf[TAM_CPF];
+            if(!ler_cpf("CPF do cliente: ",cpf,0)){pausar();return;}
+            Usuario *cli=buscar_cpf(cpf);
+            if(!cli){puts("  [!] Cliente nao encontrado.");pausar();return;}
+            a.id_cli=cli->id;
+        } else a.id_cli=logado->id;
+    } else a.id_cli=logado->id;
+    /* data */
+    char hoje[TAM_DATA]; data_hoje(hoje);
+    printf("\n  Hoje: %s\n",hoje);
+    int tent=0;
+    while(1){
+        if(!ler_str("  Data (DD/MM/AAAA): ",a.data,TAM_DATA)||!a.data[0]){
+            puts("  [!] Entrada invalida.");pausar();return;
         }
-    } else {
-        novo.id_cliente = logado->id;
+        if(!validar_data(a.data)) puts("  [!] Data invalida.");
+        else if(cmp_data(a.data,hoje)<0) puts("  [!] Data no passado.");
+        else break;
+        if(++tent>=3){puts("  [!] Muitas tentativas.");pausar();return;}
     }
-
-    char hoje[TAM_DATA];
-    data_hoje(hoje);
-    printf("\n  Hoje: %s\n", hoje);
-    char data[TAM_DATA];
-    ler_string("  Data (DD/MM/AAAA): ", data, TAM_DATA);
-    if (!validar_data(data)) { printf("  [!] Data invalida.\n"); pausar(); return; }
-    if (cmp_data(data, hoje) < 0) { printf("  [!] Data no passado.\n"); pausar(); return; }
-    strcpy(novo.data, data);
-
-//serviços
-    printf("\n");
-    listar_servicos_tabela();
-    int svc = ler_int("Escolha o servico [1-5]: ");
-    if (svc < 1 || svc > N_SERVICOS) { printf("  [!] Servico invalido.\n"); pausar(); return; }
-    novo.servico = (TipoServico)svc;
-
-    /* Slots disponíveis */
-    printf("\n  Horarios em %s:\n\n", data);
-    int disp = 0;
-    for (int s = 0; s < TOTAL_SLOTS; s++) {
-        int ocup = slot_ocupado(data, s, 0, -1);
-        printf("    %2d - %s  %s\n", s + 1, SLOTS[s], ocup ? "[Ocupado   ]" : "[Disponivel]");
-        if (!ocup) disp++;
+    /* servico */
+    putchar('\n'); listar_svcs();
+    int sv=ler_int("Servico [1-5]: ");
+    if(sv<1||sv>N_SVC){puts("  [!] Servico invalido.");pausar();return;}
+    a.svc=(Servico)sv;
+    /* horario */
+    printf("\n  Horarios em %s:\n\n",a.data);
+    int disp=0;
+    for(int s=0;s<TOTAL_SLOTS;s++){
+        int livre=slot_livre(a.data,s,0,-1);
+        printf("    %2d - %s  [%s]\n",s+1,SLOTS[s],livre?"Disponivel":"Ocupado   ");
+        if(livre) disp++;
     }
-    if (disp == 0) {
-        printf("\n  [!] Sem horarios disponiveis nesse dia.\n");
-        pausar(); return;
-    }
-
-    int slot_escolha = ler_int("\n  Numero do horario: ");
-    if (slot_escolha < 1 || slot_escolha > TOTAL_SLOTS) {
-        printf("  [!] Horario invalido.\n"); pausar(); return;
-    }
-    slot_escolha--;
-    if (slot_ocupado(data, slot_escolha, 0, -1)) {
-        printf("  [!] Horario ja ocupado.\n"); pausar(); return;
-    }
-    novo.slot = slot_escolha;
-
-    /* Barbeiro preferido */
-    printf("\n  Escolher barbeiro especifico? (s/N): ");
-    char c[4]; fgets(c, sizeof(c), stdin);
-    novo.id_barbeiro = 0;
-    if (tolower((unsigned char)c[0]) == 's') {
+    if(!disp){puts("\n  [!] Sem horarios disponiveis.");pausar();return;}
+    int hs=ler_int("\n  Numero do horario [1-20]: ");
+    if(hs<1||hs>TOTAL_SLOTS){puts("  [!] Fora da faixa.");pausar();return;}
+    hs--;
+    if(!slot_livre(a.data,hs,0,-1)){puts("  [!] Horario ja ocupado.");pausar();return;}
+    a.slot=hs;
+    /* barbeiro */
+    if(confirmar("\n  Barbeiro especifico?")){
+        int qtd=0;
         printf("\n  Barbeiros:\n");
-        int nb = 0;
-        for (int i = 0; i < total_usr; i++)
-            if (usuarios[i].ativo && usuarios[i].perfil == BARBEIRO) {
-                printf("    ID %-3d - %s\n", usuarios[i].id, usuarios[i].nome);
-                nb++;
+        for(int i=0;i<total_usr;i++)
+            if(usuarios[i].ativo&&usuarios[i].perfil==BARBEIRO){
+                printf("    ID %-3d - %s\n",usuarios[i].id,usuarios[i].nome); qtd++;
             }
-        if (nb == 0) {
-            printf("  Nenhum barbeiro cadastrado.\n");
-        } else {
-            int bid = ler_int("  ID do barbeiro (0 = qualquer): ");
-            if (bid > 0) {
-                Usuario *b = buscar_id_usr(bid);
-                if (b && b->perfil == BARBEIRO)
-                    novo.id_barbeiro = bid;
-                else
-                    printf("  Barbeiro nao encontrado. Agendando para qualquer disponivel.\n");
+        if(qtd){
+            int ib=ler_int("  ID (0=qualquer): ");
+            if(ib>0){
+                Usuario *b=buscar_usr(ib);
+                if(b&&b->perfil==BARBEIRO) a.id_barb=ib;
+                else puts("  Barbeiro nao encontrado. Agendando para qualquer um.");
             }
-        }
+        } else puts("  Sem barbeiros cadastrados.");
     }
+    ler_str("Observacao (ENTER para pular): ",a.obs,TAM_OBS);
+    a.id=prox_id_ag++; a.status=AG_PEND; a.ativo=1;
+    agendamentos[total_ag++]=a;
+    salvar_ag();
 
-    /* Observações */
-    ler_string("Observacoes (Enter para pular): ", novo.obs, TAM_OBS);
-
-    novo.id     = prox_id_ag++;
-    novo.status = AG_PENDENTE;
-    novo.ativo  = 1;
-    agendamentos[total_ag++] = novo;
-    salvar_agendamentos();
+    /* Registra na pilha de historico (demonstracao de PILHA) */
+    if(pilha_push(&historico, a.id))
+        printf("\n  Agendamento registrado no historico. (PILHA - push, ID: %d)\n",a.id);
 
     printf("\n  Agendamento realizado!\n\n");
-    imprimir_agendamento(&agendamentos[total_ag - 1]);
+    print_ag(&agendamentos[total_ag-1]);
     pausar();
 }
 
-
-void listar_agendamentos_filtrado(int id_cliente, int id_barbeiro,
-                                   const char *data_filtro, int so_pendentes) {
-    int ok = 0;
-    for (int i = 0; i < total_ag; i++) {
-        Agendamento *ag = &agendamentos[i];
-        if (!ag->ativo) continue;
-        if (id_cliente  > 0 && ag->id_cliente  != id_cliente)  continue;
-        if (id_barbeiro > 0 && ag->id_barbeiro != id_barbeiro) continue;
-        if (data_filtro && data_filtro[0] && strcmp(ag->data, data_filtro) != 0) continue;
-        if (so_pendentes && ag->status != AG_PENDENTE) continue;
-        imprimir_agendamento(ag); putchar('\n'); ok = 1;
-    }
-    if (!ok) printf("  Nenhum agendamento encontrado.\n");
-}
-
-void meus_agendamentos(void) {
+void meus_ags(void) {
+    if(!logado) return;
     cabecalho("MEUS AGENDAMENTOS");
-    printf("  1 - Todos\n  2 - Apenas pendentes\n  3 - Por data\n");
-    int op = ler_int("Opcao: ");
-    char data_f[TAM_DATA] = {0};
-    int pend = 0;
-    if (op == 2) pend = 1;
-    if (op == 3) ler_string("Data (DD/MM/AAAA): ", data_f, TAM_DATA);
-    listar_agendamentos_filtrado(logado->id, 0, data_f[0] ? data_f : NULL, pend);
+    printf("  1-Todos  2-Pendentes  3-Por data\n");
+    int op=ler_int("Opcao: ");
+    char fd[TAM_DATA]={0}; int pend=0;
+    if(op==2) pend=1;
+    else if(op==3){
+        if(!ler_str("Data (DD/MM/AAAA): ",fd,TAM_DATA)||!validar_data(fd)){
+            puts("  [!] Data invalida.");pausar();return;
+        }
+    }
+    listar_ags(logado->id,0,fd[0]?fd:NULL,pend);
     pausar();
 }
 
-void agenda_barbeiro(void) {
+void agenda_barb(void) {
+    if(!logado) return;
     cabecalho("MINHA AGENDA");
-    printf("  1 - Hoje\n  2 - Por data\n  3 - Todos os pendentes\n");
-    int op = ler_int("Opcao: ");
-    char data_f[TAM_DATA] = {0};
-    int pend = 0;
-    if      (op == 1) { data_hoje(data_f); }
-    else if (op == 2) { ler_string("Data (DD/MM/AAAA): ", data_f, TAM_DATA); }
-    else              { pend = 1; }
-    listar_agendamentos_filtrado(0, logado->id, data_f[0] ? data_f : NULL, pend);
+    printf("  1-Hoje  2-Por data  3-Todos pendentes\n");
+    int op=ler_int("Opcao: ");
+    char fd[TAM_DATA]={0}; int pend=0;
+    if(op==1) data_hoje(fd);
+    else if(op==2){
+        if(!ler_str("Data (DD/MM/AAAA): ",fd,TAM_DATA)||!validar_data(fd)){
+            puts("  [!] Data invalida.");pausar();return;
+        }
+    } else pend=1;
+    listar_ags(0,logado->id,fd[0]?fd:NULL,pend);
     pausar();
 }
 
-void listar_todos_agendamentos(void) {
+void listar_todos_ags(void) {
     cabecalho("TODOS OS AGENDAMENTOS");
-    printf("  1 - Todos\n  2 - Pendentes\n  3 - Por data\n  4 - Por cliente (CPF)\n");
-    int op = ler_int("Opcao: ");
-    char data_f[TAM_DATA] = {0};
-    int pend = 0, id_cli = 0;
-    if      (op == 2) pend = 1;
-    else if (op == 3) ler_string("Data (DD/MM/AAAA): ", data_f, TAM_DATA);
-    else if (op == 4) {
-        char r[TAM_CPF], f[TAM_CPF];
-        ler_string("CPF do cliente: ", r, TAM_CPF);
-        if (validar_cpf_formato(r)) {
-            formatar_cpf(r, f);
-            if (!validar_cpf_digitos(f)) {
-                printf("  [!] CPF invalido (digitos verificadores incorretos).\n");
-                pausar(); return;
-            }
-            Usuario *u = buscar_cpf(f);
-            if (u) id_cli = u->id;
-            else { printf("  [!] Cliente nao encontrado.\n"); pausar(); return; }
+    printf("  1-Todos  2-Pendentes  3-Por data  4-Por cliente\n");
+    int op=ler_int("Opcao: ");
+    char fd[TAM_DATA]={0}; int pend=0,id_cli=0;
+    if(op==2) pend=1;
+    else if(op==3){
+        if(!ler_str("Data (DD/MM/AAAA): ",fd,TAM_DATA)||!validar_data(fd)){
+            puts("  [!] Data invalida.");pausar();return;
         }
-    }
-    listar_agendamentos_filtrado(id_cli, 0, data_f[0] ? data_f : NULL, pend);
+    } else if(op==4){
+        char cpf[TAM_CPF];
+        if(!ler_cpf("CPF do cliente: ",cpf,1)){pausar();return;}
+        Usuario *c=buscar_cpf(cpf);
+        if(!c){puts("  [!] Cliente nao localizado.");pausar();return;}
+        id_cli=c->id;
+    } else if(op!=1){puts("  [!] Opcao invalida.");pausar();return;}
+    listar_ags(id_cli,0,fd[0]?fd:NULL,pend);
     pausar();
 }
 
-
-Agendamento *buscar_ag_por_id(int id) {
-    for (int i = 0; i < total_ag; i++)
-        if (agendamentos[i].ativo && agendamentos[i].id == id)
-            return &agendamentos[i];
-    return NULL;
-}
-
-void cancelar_agendamento(void) {
+void cancelar_ag(void) {
+    if(!logado) return;
     cabecalho("CANCELAR AGENDAMENTO");
-
-    if (logado->perfil == CLIENTE) {
-        printf("  Seus agendamentos pendentes:\n\n");
-        listar_agendamentos_filtrado(logado->id, 0, NULL, 1);
-    } else {
-        printf("  Agendamentos pendentes:\n\n");
-        listar_agendamentos_filtrado(0, 0, NULL, 1);
+    if(logado->perfil==CLIENTE) listar_ags(logado->id,0,NULL,1);
+    else listar_ags(0,0,NULL,1);
+    int id=ler_int("\n  ID do agendamento (0=voltar): ");
+    if(!id) return;
+    if(id<0){puts("  [!] ID invalido.");pausar();return;}
+    Agendamento *ag=buscar_ag(id);
+    if(!ag){puts("  [!] Nao localizado.");pausar();return;}
+    if(ag->status!=AG_PEND){puts("  [!] Nao esta pendente.");pausar();return;}
+    if(logado->perfil==CLIENTE&&ag->id_cli!=logado->id){
+        puts("  [!] Permissao negada.");pausar();return;
     }
+    putchar('\n'); print_ag(ag);
+    if(!confirmar("\n  Confirmar cancelamento?")){puts("  Cancelado.");pausar();return;}
+    ag->status=AG_CANCEL;
+    salvar_ag();
 
-    int id = ler_int("\n  ID do agendamento (0 = voltar): ");
-    if (id == 0) return;
+    /* Registra cancelamento na pilha de historico (PILHA - push) */
+    pilha_push(&historico, ag->id);
+    printf("\n  Cancelamento registrado no historico. (PILHA - push, ID: %d)\n",ag->id);
 
-    Agendamento *ag = buscar_ag_por_id(id);
-    if (!ag) { printf("  [!] Nao encontrado.\n"); pausar(); return; }
-    if (ag->status != AG_PENDENTE) {
-        printf("  [!] So e possivel cancelar agendamentos pendentes.\n");
-        pausar(); return;
-    }
-    if (logado->perfil == CLIENTE && ag->id_cliente != logado->id) {
-        printf("  [!] Voce so pode cancelar seus proprios agendamentos.\n");
-        pausar(); return;
-    }
-
-    putchar('\n'); imprimir_agendamento(ag);
-    printf("\n  Confirmar cancelamento? (s/N): ");
-    char conf[4]; fgets(conf, sizeof(conf), stdin);
-    if (tolower((unsigned char)conf[0]) != 's') {
-        printf("  Operacao cancelada.\n"); pausar(); return;
-    }
-
-    ag->status = AG_CANCELADO;
-    salvar_agendamentos();
-    printf("\n  Agendamento cancelado.\n");
+    puts("\n  Agendamento cancelado.");
     pausar();
 }
 
-void concluir_agendamento(void) {
-    cabecalho("MARCAR COMO CONCLUIDO");
-    int id_barb = (logado->perfil == BARBEIRO) ? logado->id : 0;
-    printf("  Agendamentos pendentes:\n\n");
-    listar_agendamentos_filtrado(0, id_barb, NULL, 1);
-
-    int id = ler_int("\n  ID do agendamento (0 = voltar): ");
-    if (id == 0) return;
-
-    Agendamento *ag = buscar_ag_por_id(id);
-    if (!ag || ag->status != AG_PENDENTE) {
-        printf("  [!] Agendamento invalido ou nao pendente.\n"); pausar(); return;
+void concluir_ag(void) {
+    if(!logado) return;
+    cabecalho("CONCLUIR AGENDAMENTO");
+    int id_barb = logado->perfil==BARBEIRO ? logado->id : 0;
+    listar_ags(0,id_barb,NULL,1);
+    int id=ler_int("\n  ID do agendamento (0=voltar): ");
+    if(!id) return;
+    Agendamento *ag=buscar_ag(id);
+    if(!ag||ag->status!=AG_PEND){puts("  [!] Invalido ou nao pendente.");pausar();return;}
+    if(logado->perfil==BARBEIRO&&ag->id_barb&&ag->id_barb!=logado->id){
+        puts("  [!] Nao pertence a sua agenda.");pausar();return;
     }
-    if (logado->perfil == BARBEIRO && ag->id_barbeiro != 0 && ag->id_barbeiro != logado->id) {
-        printf("  [!] Esse agendamento nao esta na sua agenda.\n"); pausar(); return;
-    }
-    ag->status = AG_CONCLUIDO;
-    salvar_agendamentos();
-    printf("\n  Agendamento concluido!\n");
+    ag->status=AG_OK;
+    salvar_ag();
+
+    /* Demonstra dequeue: cliente atendido sai da fila de espera */
+    int prox=fila_dequeue(&fila_espera);
+    if(prox>0)
+        printf("\n  Proximo cliente chamado da fila: ID %d (FILA - dequeue)\n",prox);
+
+    puts("\n  Servico concluido.");
     pausar();
 }
 
-void excluir_agendamento_permanente(void) {
-    cabecalho("EXCLUIR AGENDAMENTO (PERMANENTE)");
-    listar_agendamentos_filtrado(0, 0, NULL, 0);
-
-    int id = ler_int("\n  ID do agendamento (0 = voltar): ");
-    if (id == 0) return;
-
-    Agendamento *ag = buscar_ag_por_id(id);
-    if (!ag) { printf("  [!] Nao encontrado.\n"); pausar(); return; }
-
-    putchar('\n'); imprimir_agendamento(ag);
-    printf("\n  Excluir PERMANENTEMENTE? (s/N): ");
-    char conf[4]; fgets(conf, sizeof(conf), stdin);
-    if (tolower((unsigned char)conf[0]) != 's') {
-        printf("  Cancelado.\n"); pausar(); return;
-    }
-    ag->ativo = 0;
-    salvar_agendamentos();
-    printf("\n  Agendamento removido do sistema.\n");
+void excluir_ag_perm(void) {
+    cabecalho("EXCLUIR AGENDAMENTO");
+    listar_ags(0,0,NULL,0);
+    int id=ler_int("\n  ID (0=voltar): ");
+    if(!id) return;
+    Agendamento *ag=buscar_ag(id);
+    if(!ag){puts("  [!] Nao encontrado.");pausar();return;}
+    putchar('\n'); print_ag(ag);
+    if(!confirmar("\n  Excluir DEFINITIVAMENTE?")){puts("  Cancelado.");pausar();return;}
+    ag->ativo=0;
+    salvar_ag();
+    puts("\n  Agendamento removido.");
     pausar();
 }
 
-
-void relatorio_admin(void) {
+/* ─── Relatorio ───────────────────────────────────────────── */
+void relatorio(void) {
     cabecalho("RELATORIO GERAL");
-
-    int pend = 0, conc = 0, canc = 0, hoje_pend = 0;
-    float receita = 0.0f;
-    char hoje[TAM_DATA]; data_hoje(hoje);
-
-    for (int i = 0; i < total_ag; i++) {
-        if (!agendamentos[i].ativo) continue;
-        switch (agendamentos[i].status) {
-            case AG_PENDENTE:
-                pend++;
-                if (strcmp(agendamentos[i].data, hoje) == 0) hoje_pend++;
-                break;
-            case AG_CONCLUIDO:
-                conc++;
-                receita += info_servico(agendamentos[i].servico)->preco;
-                break;
-            case AG_CANCELADO: canc++; break;
-        }
+    int pend=0,ok=0,canc=0,hoje_pend=0;
+    int tot_usr=0,cli=0,barb=0,adm=0;
+    double receita=0.0;
+    char str_hoje[TAM_DATA]; data_hoje(str_hoje);
+    for(int i=0;i<total_ag;i++){
+        if(!agendamentos[i].ativo) continue;
+        StatusAg s=agendamentos[i].status;
+        if(s==AG_PEND){pend++;if(!strcmp(agendamentos[i].data,str_hoje))hoje_pend++;}
+        else if(s==AG_OK){ok++;receita+=get_svc(agendamentos[i].svc)->preco;}
+        else canc++;
     }
-
-    int usr_a = 0, barb_a = 0, cli_a = 0, adm_a = 0;
-    for (int i = 0; i < total_usr; i++) {
-        if (!usuarios[i].ativo) continue;
-        usr_a++;
-        if (usuarios[i].perfil == BARBEIRO) barb_a++;
-        if (usuarios[i].perfil == CLIENTE)  cli_a++;
-        if (usuarios[i].perfil == ADMIN)    adm_a++;
+    for(int i=0;i<total_usr;i++){
+        if(!usuarios[i].ativo) continue;
+        tot_usr++;
+        if(usuarios[i].perfil==CLIENTE)   cli++;
+        else if(usuarios[i].perfil==BARBEIRO) barb++;
+        else adm++;
     }
+    printf("  === USUARIOS ========\n");
+    printf("  Total    : %d  |  Clientes : %d\n",tot_usr,cli);
+    printf("  Barbeiros: %d  |  Admins   : %d\n",barb,adm);
+    printf("\n  === AGENDAMENTOS ====\n");
+    printf("  Hoje(pend): %d  |  Pendentes  : %d\n",hoje_pend,pend);
+    printf("  Concluidos: %d  |  Cancelados : %d\n",ok,canc);
+    printf("\n  === FINANCEIRO ======\n");
+    printf("  Receita total: R$ %.2f\n",receita);
 
-    printf("  === USUARIOS ================================\n");
-    printf("  Total ativos : %d\n", usr_a);
-    printf("  Clientes     : %d\n", cli_a);
-    printf("  Barbeiros    : %d\n", barb_a);
-    printf("  Admins       : %d\n", adm_a);
-    printf("\n  === AGENDAMENTOS ============================\n");
-    printf("  Hoje (pend.) : %d\n", hoje_pend);
-    printf("  Pendentes    : %d\n", pend);
-    printf("  Concluidos   : %d\n", conc);
-    printf("  Cancelados   : %d\n", canc);
-    printf("\n  === FINANCEIRO ==============================\n");
-    printf("  Receita total: R$ %.2f\n", (double)receita);
-    printf("  ============================================\n");
+    /* Demonstra a pilha: mostra ultimo agendamento alterado */
+    printf("\n  === HISTORICO (PILHA) ==\n");
+    int ult=pilha_pop(&historico);
+    if(ult>0) printf("  Ultimo ag. alterado (pop): ID %d\n",ult);
+    else       printf("  Historico vazio.\n");
+
+    /* Demonstra a fila: mostra proximo da fila de espera */
+    printf("\n  === FILA DE ESPERA (FILA) ==\n");
+    printf("  Clientes aguardando: %d\n",fila_espera.tamanho);
+
+    printf("  ====================\n");
     pausar();
 }
 
-void menu_cliente(void) {
+/* ─── Menus ───────────────────────────────────────────────── */
+void menu_cli(void) {
     int op;
     do {
-        cabecalho("MENU CLIENTE");
-        printf("  Ola, %s!\n\n", logado->nome);
-        printf("  -- Agendamentos ---------------------------\n");
-        printf("  1  - Novo agendamento\n");
-        printf("  2  - Meus agendamentos\n");
-        printf("  3  - Cancelar agendamento\n");
-        printf("  -- Minha Conta ----------------------------\n");
-        printf("  4  - Ver meu perfil\n");
-        printf("  5  - Alterar senha\n");
-        printf("  6  - Excluir minha conta\n");
-        printf("  -------------------------------------------\n");
-        printf("  0  - Sair\n\n");
-        op = ler_int("Opcao: ");
-        switch (op) {
-            case 1: criar_agendamento();    break;
-            case 2: meus_agendamentos();    break;
-            case 3: cancelar_agendamento(); break;
-            case 4:
-                cabecalho("MEU PERFIL");
-                imprimir_usuario(logado); pausar(); break;
-            case 5: alterar_senha();  break;
-            case 6: excluir_usuario(); if (!logado) op = 0; break;
-        }
-    } while (op != 0);
-    logado = NULL;
-}
-
-
-void menu_barbeiro(void) {
-    int op;
-    do {
-        cabecalho("MENU BARBEIRO");
-        printf("  Ola, %s!\n\n", logado->nome);
-        printf("  -- Agenda ---------------------------------\n");
-        printf("  1  - Ver minha agenda\n");
-        printf("  2  - Marcar servico como concluido\n");
-        printf("  3  - Cancelar agendamento\n");
-        printf("  -- Minha Conta ----------------------------\n");
-        printf("  4  - Ver meu perfil\n");
-        printf("  5  - Alterar senha\n");
-        printf("  -------------------------------------------\n");
-        printf("  0  - Sair\n\n");
-        op = ler_int("Opcao: ");
-        switch (op) {
-            case 1: agenda_barbeiro();      break;
-            case 2: concluir_agendamento(); break;
-            case 3: cancelar_agendamento(); break;
-            case 4:
-                cabecalho("MEU PERFIL");
-                imprimir_usuario(logado); pausar(); break;
+        if(!logado) break;
+        cabecalho("PAINEL DO CLIENTE");
+        printf("  Ola, %s!\n\n",logado->nome);
+        printf("  1-Novo agendamento    2-Meus agendamentos\n");
+        printf("  3-Cancelar servico    4-Ver meu perfil\n");
+        printf("  5-Alterar senha       6-Excluir conta\n");
+        printf("  0-Sair\n\n");
+        op=ler_int("Opcao: ");
+        switch(op){
+            case 1: criar_ag(); break;
+            case 2: meus_ags(); break;
+            case 3: cancelar_ag(); break;
+            case 4: cabecalho("MEU PERFIL"); if(logado)print_usr(logado); pausar(); break;
             case 5: alterar_senha(); break;
+            case 6: excluir_usr(); if(!logado)op=0; break;
+            case 0: break;
+            default: puts("  [!] Opcao invalida."); pausar();
         }
-    } while (op != 0);
-    logado = NULL;
+    } while(op!=0&&logado);
+    logado=NULL;
 }
 
-void menu_admin(void) {
+void menu_barb(void) {
     int op;
     do {
-        cabecalho("MENU ADMINISTRADOR");
-        printf("  Ola, %s!\n\n", logado->nome);
-        printf("  -- Usuarios --------------------------------\n");
-        printf("  1  - Cadastrar cliente\n");
-        printf("  2  - Cadastrar barbeiro\n");
-        printf("  3  - Listar usuarios\n");
-        printf("  4  - Buscar usuario\n");
-        printf("  5  - Excluir usuario\n");
-        printf("  -- Agendamentos ----------------------------\n");
-        printf("  6  - Novo agendamento\n");
-        printf("  7  - Ver todos os agendamentos\n");
-        printf("  8  - Cancelar agendamento\n");
-        printf("  9  - Marcar como concluido\n");
-        printf("  10 - Excluir agendamento (permanente)\n");
-        printf("  -- Sistema ---------------------------------\n");
-        printf("  11 - Relatorio geral\n");
-        printf("  12 - Alterar minha senha\n");
-        printf("  --------------------------------------------\n");
-        printf("  0  - Sair\n\n");
-        op = ler_int("Opcao: ");
-        switch (op) {
-            case 1:  cadastrar_usuario();              break;
-            case 2:  cadastrar_barbeiro();             break;
-            case 3:  listar_usuarios();                break;
-            case 4:  buscar_usuario();                 break;
-            case 5:  excluir_usuario();                break;
-            case 6:  criar_agendamento();              break;
-            case 7:  listar_todos_agendamentos();      break;
-            case 8:  cancelar_agendamento();           break;
-            case 9:  concluir_agendamento();           break;
-            case 10: excluir_agendamento_permanente(); break;
-            case 11: relatorio_admin();                break;
-            case 12: alterar_senha();                  break;
+        if(!logado) break;
+        cabecalho("PAINEL DO BARBEIRO");
+        printf("  Ola, %s!\n\n",logado->nome);
+        printf("  1-Minha agenda    2-Concluir servico\n");
+        printf("  3-Cancelar ag.    4-Meu perfil\n");
+        printf("  5-Alterar senha   0-Sair\n\n");
+        op=ler_int("Opcao: ");
+        switch(op){
+            case 1: agenda_barb(); break;
+            case 2: concluir_ag(); break;
+            case 3: cancelar_ag(); break;
+            case 4: cabecalho("MEU PERFIL"); if(logado)print_usr(logado); pausar(); break;
+            case 5: alterar_senha(); break;
+            case 0: break;
+            default: puts("  [!] Opcao invalida."); pausar();
         }
-    } while (op != 0);
-    logado = NULL;
+    } while(op!=0&&logado);
+    logado=NULL;
 }
 
+void menu_adm(void) {
+    int op;
+    do {
+        if(!logado) break;
+        cabecalho("PAINEL DO ADMIN");
+        printf("  Admin: %s\n\n",logado->nome);
+        printf("  1-Novo cliente        2-Novo barbeiro\n");
+        printf("  3-Listar usuarios     4-Buscar usuario\n");
+        printf("  5-Excluir usuario     6-Novo agendamento\n");
+        printf("  7-Listar agendamentos 8-Cancelar ag.\n");
+        printf("  9-Concluir ag.        10-Excluir ag.\n");
+        printf("  11-Relatorio          12-Alterar senha\n");
+        printf("  0-Sair\n\n");
+        op=ler_int("Opcao: ");
+        switch(op){
+            case 1:  cadastrar_usr();  break;
+            case 2:  cadastrar_barb(); break;
+            case 3:  listar_usr();     break;
+            case 4:  buscar_usuario(); break;
+            case 5:  excluir_usr();    break;
+            case 6:  criar_ag();       break;
+            case 7:  listar_todos_ags();break;
+            case 8:  cancelar_ag();    break;
+            case 9:  concluir_ag();    break;
+            case 10: excluir_ag_perm();break;
+            case 11: relatorio();      break;
+            case 12: alterar_senha();  break;
+            case 0:  break;
+            default: puts("  [!] Opcao invalida."); pausar();
+        }
+    } while(op!=0&&logado);
+    logado=NULL;
+}
 
 void menu_principal(void) {
     int op;
     do {
-        cabecalho("INICIO");
-        printf("  1 - Login\n");
-        printf("  2 - Cadastrar-se (novo cliente)\n");
-        printf("  0 - Sair\n\n");
-        op = ler_int("Opcao: ");
-        switch (op) {
+        cabecalho("PAGINA INICIAL");
+        printf("  1-Login    2-Cadastrar conta    0-Sair\n\n");
+        op=ler_int("Opcao: ");
+        switch(op){
             case 1:
-                if (fazer_login()) {
-                    switch (logado->perfil) {
-                        case ADMIN:    menu_admin();    break;
-                        case BARBEIRO: menu_barbeiro(); break;
-                        case CLIENTE:  menu_cliente();  break;
-                    }
+                if(fazer_login()&&logado){
+                    if(logado->perfil==ADMIN)    menu_adm();
+                    else if(logado->perfil==BARBEIRO) menu_barb();
+                    else menu_cli();
                 }
                 break;
-            case 2:
-                cadastrar_usuario();
-                break;
+            case 2: cadastrar_usr(); break;
+            case 0: break;
+            default: puts("  [!] Opcao invalida."); pausar();
         }
-    } while (op != 0);
+    } while(op!=0);
 }
 
+/* ─── Main ────────────────────────────────────────────────── */
 int main(void) {
-    carregar_usuarios();
-    carregar_agendamentos();
+    /* Inicializa estruturas de dados */
+    pilha_init(&historico);
+    fila_init(&fila_espera);
+
+    carregar_usr();
+    carregar_ag();
 
     cabecalho("BEM-VINDO");
-    printf("  Sistema de Gestao de Barbearia  --  v2.2\n\n");
-    printf("  Acesso admin padrao:\n");
-    printf("    CPF   : 000.000.000-00\n");
-    printf("    Senha : admin123\n");
+    printf("  Sistema de Gestao de Barbearia  v3.0\n\n");
     pausar();
 
     menu_principal();
 
     limpar_tela();
-    printf("  Obrigado por usar o Sistema de Barbearia!\n\n");
+    printf("  Obrigado por utilizar o Sistema de Barbearia!\n\n");
     return 0;
 }
